@@ -1,11 +1,4 @@
-/* Porte-à-Porte – Ris-Orangis (client-only, offline-first)
- * - Import CSV (PapaParse)
- * - Filtres (bureau / recherche), tri, pagination
- * - Statuts + remarques éditables
- * - Export CSV (complet / vue / Favorables / Favorables+Indécis)
- * - Persistance locale (localStorage)
- */
-
+/* Porte-à-Porte – Ris-Orangis (robuste aux CSV FR/Excel) */
 (() => {
   // ==== Sélecteurs
   const els = {
@@ -29,6 +22,7 @@
     btnExportView: document.getElementById('btnExportView'),
     btnExportFav: document.getElementById('btnExportFav'),
     btnExportFavInd: document.getElementById('btnExportFavInd'),
+    btnResetAll: document.getElementById('btnResetAll'),
   };
 
   // ==== État
@@ -71,24 +65,59 @@
   const uid = (() => { let n = 0; return () => 'row_' + Date.now().toString(36) + '_' + (++n).toString(36); })();
   const norm = (s) => (s ?? '').toString().trim();
   const lower = (s) => norm(s).toLowerCase();
+  const stripAccents = (s) => norm(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const keyify = (h) => stripAccents(h).toLowerCase().replace(/[^a-z0-9]+/g,'').trim();
 
+  const pick = (obj, keys) => {
+    for (const k of keys) {
+      const v = obj[k];
+      if (v !== undefined && String(v).trim() !== '') return v;
+    }
+    return '';
+  };
+
+  function buildAddress(obj) {
+    // Si "adresse" manque, on tente de reconstruire
+    let adr = pick(obj, ['adresse','adressecomplete','address','addresse','adr','libellevoie','voie']);
+    if (!adr) {
+      const num = pick(obj, ['numero','numvoie','num','numadr']);
+      const voie = pick(obj, ['voie','libellevoie','rue']);
+      const comp = pick(obj, ['complement','complementadresse','bat','appt']);
+      const cp = pick(obj, ['cp','codepostal','postalcode']);
+      const ville = pick(obj, ['ville','commune','localite','city']);
+      adr = [ [num, voie].filter(Boolean).join(' '), comp, [cp, ville].filter(Boolean).join(' ') ]
+              .filter(Boolean).join(', ');
+    }
+    return norm(adr);
+  }
+
+  function sanitizeStatut(s) {
+    const x = lower(stripAccents(s));
+    if (x.startsWith('fav')) return 'favorable';
+    if (x.startsWith('inde')) return 'indecis';
+    if (x.startsWith('defa') || x.startsWith('opp') || x.startsWith('contre')) return 'defavorable';
+    if (x.startsWith('abs')) return 'absent';
+    return DEFAULT_STATUS;
+  }
+
+  // ==== Normalisation d'une ligne
   function normalizeRow(obj) {
-    const map = new Map();
-    Object.entries(obj).forEach(([k, v]) => map.set(lower(k), v));
-
+    // ici 'obj' a déjà des clés normalisées via transformHeader()
     const row = {
       id: obj.id || uid(),
-      nom: norm(map.get('nom') ?? map.get('name') ?? ''),
-      prenom: norm(map.get('prenom') ?? map.get('prénom') ?? map.get('first') ?? ''),
-      bureau: norm(map.get('bureau') ?? map.get('bureau de vote') ?? map.get('codebureau') ?? map.get('bv') ?? ''),
-      adresse: norm(map.get('adresse') ?? map.get('addresse') ?? map.get('address') ?? ''),
-      email: norm(map.get('email') ?? map.get('mail') ?? ''),
-      telephone: norm(map.get('telephone') ?? map.get('téléphone') ?? map.get('tel') ?? ''),
-      remarque: norm(map.get('remarque') ?? map.get('note') ?? map.get('commentaire') ?? ''),
-      statut: (lower(map.get('statut')) || DEFAULT_STATUS)
-                .replace('indécis','indecis')
-                .replace('défavorable','defavorable'),
+      nom: norm(pick(obj, ['nom','nomdefamille','nomnaissance','lastname','name'])),
+      prenom: norm(pick(obj, ['prenom','prenoms','firstname','first','givenname'])),
+      bureau: norm(pick(obj, ['bureau','bureaudevote','codebureau','bv','codebv','bureauvote'])),
+      adresse: buildAddress(obj),
+      email: norm(pick(obj, ['email','mail','courriel'])),
+      telephone: norm(pick(obj, ['telephone','tel','telephoneportable','mobile','gsm','phone'])),
+      remarque: norm(pick(obj, ['remarque','commentaire','note','notes','observations'])),
+      statut: obj.statut ? sanitizeStatut(obj.statut) : DEFAULT_STATUS,
     };
+
+    // Si prénom contient plusieurs prénoms, on peut garder le premier
+    if (row.prenom.includes(' ')) row.prenom = row.prenom.split(/\s+/)[0];
+
     if (!Object.keys(STATUS_LABELS).includes(row.statut)) row.statut = DEFAULT_STATUS;
     return row;
   }
@@ -111,20 +140,39 @@
     }
   }
 
-  // ==== Import CSV
+  // ==== Import CSV (robuste)
   function importCSV(file) {
     setProgress('Import en cours…');
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
+      // Supprime "sep=;" (Excel FR) + BOM, et laisse Papa détecter le délimiteur
+      beforeFirstChunk: (chunk) => {
+        // retire BOM
+        if (chunk.charCodeAt(0) === 0xFEFF) chunk = chunk.slice(1);
+        const lines = chunk.split(/\r?\n/);
+        if (lines[0] && /^sep=./i.test(lines[0])) lines.shift(); // supprime la 1ère ligne sep=;
+        return lines.join('\n');
+      },
+      // Normalise toutes les en-têtes -> clés compactes
+      transformHeader: (h) => keyify(h),
       complete: (res) => {
-        const rows = res.data.map(normalizeRow);
-        DATA = rows;
-        UI.page = 1;
-        populateBureauFilter();
-        render();
-        saveAll();
-        setProgress(`Import terminé : ${rows.length} lignes.`);
+        try {
+          const rows = res.data.map(normalizeRow);
+          // Filtre lignes vides (pas de nom & pas d'adresse)
+          const clean = rows.filter(r => r.nom || r.prenom || r.adresse);
+          DATA = clean;
+          UI.page = 1;
+          populateBureauFilter();
+          render();
+          saveAll();
+          setProgress(`Import terminé : ${clean.length} lignes.`);
+          // Log utile
+          console.log('Entêtes normalisées détectées:', Object.keys(res.data?.[0] || {}));
+        } catch (e) {
+          console.error(e);
+          setProgress('Erreur de normalisation des données.');
+        }
       },
       error: (err) => setProgress('Erreur import: ' + (err?.message || err))
     });
@@ -336,7 +384,6 @@
       row.remarque = remark.trim();
       row.statut = statut;
       saveAll();
-      // met à jour juste le badge
       const td = tr.children[7];
       td.querySelectorAll('.badge').forEach(b => b.remove());
       const span = document.createElement('span');
@@ -367,14 +414,25 @@
     const id = tr.getAttribute('data-id');
     const row = DATA.find(r => r.id === id);
     if (!row) return;
-
     if (e.target.classList.contains('status')) {
       row.statut = e.target.value;
       saveAll(); render();
     }
   });
 
-  // Drag & drop pratique
+  // Reset stockage local
+  els.btnResetAll?.addEventListener('click', () => {
+    if (!confirm('Effacer toutes les données locales (CSV importé, statuts, remarques) ?')) return;
+    localStorage.removeItem('pap-data-v1');
+    localStorage.removeItem('pap-ui-v1');
+    DATA = [];
+    UI = { bureau:'', q:'', sortCol:'nom', sortDir:'asc', page:1, pageSize:Number(els.pageSize?.value || 1000) };
+    populateBureauFilter();
+    render();
+    setProgress('Aucun fichier importé.');
+  });
+
+  // Drag & drop
   window.addEventListener('dragover', (e) => { e.preventDefault(); });
   window.addEventListener('drop', (e) => {
     e.preventDefault();
