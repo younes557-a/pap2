@@ -1,0 +1,28 @@
+# 🗳️ Porte-à-Porte – Ris-Orangis (client-only)
+
+Application statique (GitHub Pages OK) pour gérer une base d’électeurs **hors-ligne** :
+- Import CSV (PapaParse)
+- Filtres, recherche, tri, pagination
+- Statuts (Favorable / Indécis / Défavorable / Absent / Non contacté)
+- Remarques par ligne, suppression, cycle de statut
+- Export : **complet**, **vue actuelle**, **Favorables**, **Favorables+Indécis**
+- Persistance locale via `localStorage`
+
+## Déploiement
+1. Mets `index.html`, `styles.css`, `app.js` à la racine du repo.
+2. Active GitHub Pages (branch `main`, répertoire `/root`).
+3. Ouvre l’URL — tout fonctionne en local et en prod (pas de backend).
+
+## Format CSV attendu (entêtes tolérantes)
+Les colonnes sont reconnues de façon souple (casse/variantes) :
+- `Nom`, `Prenom` (ou `Prénom`), `Bureau de vote` / `Bureau` / `CodeBureau` / `BV`,
+- `Adresse`, `Email`/`Mail`, `Telephone`/`Téléphone`/`Tel`,
+- `Remarque`/`Commentaire`/`Note`,
+- `Statut` (valeurs: `favorable`, `indecis`, `defavorable`, `absent`, `non_contacte`).
+
+Les autres colonnes sont ignorées.
+
+## Conseils
+- L’appli sauvegarde automatiquement dans le navigateur (clé `pap-data-v1`).
+- Pour repartir de zéro : **vider le stockage local** du site dans les outils développeur.
+- Drag & Drop d’un CSV supporté (dépose le fichier sur la page).
