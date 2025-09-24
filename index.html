@@ -1,28 +1,144 @@
-# 🗳️ Porte-à-Porte – Ris-Orangis (client-only)
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Porte-à-Porte – Ris-Orangis</title>
 
-Application statique (GitHub Pages OK) pour gérer une base d’électeurs **hors-ligne** :
-- Import CSV (PapaParse)
-- Filtres, recherche, tri, pagination
-- Statuts (Favorable / Indécis / Défavorable / Absent / Non contacté)
-- Remarques par ligne, suppression, cycle de statut
-- Export : **complet**, **vue actuelle**, **Favorables**, **Favorables+Indécis**
-- Persistance locale via `localStorage`
+    <!-- Styles locaux -->
+    <link rel="stylesheet" href="styles.css" />
 
-## Déploiement
-1. Mets `index.html`, `styles.css`, `app.js` à la racine du repo.
-2. Active GitHub Pages (branch `main`, répertoire `/root`).
-3. Ouvre l’URL — tout fonctionne en local et en prod (pas de backend).
+    <!-- Tailwind CDN (utilitaires) -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
-## Format CSV attendu (entêtes tolérantes)
-Les colonnes sont reconnues de façon souple (casse/variantes) :
-- `Nom`, `Prenom` (ou `Prénom`), `Bureau de vote` / `Bureau` / `CodeBureau` / `BV`,
-- `Adresse`, `Email`/`Mail`, `Telephone`/`Téléphone`/`Tel`,
-- `Remarque`/`Commentaire`/`Note`,
-- `Statut` (valeurs: `favorable`, `indecis`, `defavorable`, `absent`, `non_contacte`).
+    <!-- PapaParse pour CSV -->
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-Les autres colonnes sont ignorées.
+    <meta name="description" content="Outil statique hors-ligne pour le porte-à-porte : import CSV, filtres, tri, pagination, statuts et export." />
+  </head>
 
-## Conseils
-- L’appli sauvegarde automatiquement dans le navigateur (clé `pap-data-v1`).
-- Pour repartir de zéro : **vider le stockage local** du site dans les outils développeur.
-- Drag & Drop d’un CSV supporté (dépose le fichier sur la page).
+  <body class="bg-gray-50 text-gray-900">
+    <noscript>
+      <div class="max-w-7xl mx-auto px-4 py-3 text-red-700">
+        Active JavaScript pour utiliser l’application.
+      </div>
+    </noscript>
+
+    <!-- HEADER -->
+    <header class="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
+      <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+        <h1 class="text-xl font-semibold">🗳️ Porte-à-Porte – Ris-Orangis</h1>
+        <div class="ml-auto flex items-center gap-2 flex-wrap">
+          <button id="btnExport" class="btn">Exporter le CSV (complet)</button>
+          <button id="btnExportView" class="btn-secondary">Exporter la vue</button>
+          <button id="btnExportFav" class="btn-green">Exporter Favorables</button>
+          <button id="btnExportFavInd" class="btn-amber">Exporter Favorables + Indécis</button>
+
+          <label class="btn cursor-pointer">
+            Importer un CSV
+            <input id="fileInput" type="file" accept=".csv,text/csv" class="hidden" />
+          </label>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN -->
+    <main class="max-w-7xl mx-auto px-4 py-4 space-y-4">
+      <!-- Filtres & Outils -->
+      <section class="card">
+        <h2 class="card-title">Filtres & Outils</h2>
+
+        <div class="grid md:grid-cols-3 gap-3">
+          <!-- Bureau -->
+          <div class="space-y-2">
+            <label class="text-xs text-gray-600">Bureau de vote</label>
+            <select id="bureauFilter" class="input">
+              <option value="">Tous les bureaux</option>
+            </select>
+          </div>
+
+          <!-- Recherche -->
+          <div class="space-y-2">
+            <label class="text-xs text-gray-600">Recherche</label>
+            <div class="flex gap-2">
+              <input id="searchInput" class="input flex-1" placeholder="Nom, adresse…" />
+              <button id="btnSearch" class="btn-secondary">Chercher</button>
+            </div>
+            <button id="btnClearFilters" class="btn-tertiary w-full">Réinitialiser</button>
+          </div>
+
+          <!-- Tri -->
+          <div class="space-y-2">
+            <label class="text-xs text-gray-600">Tri</label>
+            <div class="grid grid-cols-3 gap-2">
+              <select id="sortColumn" class="input col-span-2">
+                <option value="nom">Nom</option>
+                <option value="prenom">Prénom</option>
+                <option value="bureau">Bureau de vote</option>
+                <option value="adresse">Adresse</option>
+              </select>
+              <button id="sortToggle" class="btn-secondary" title="Ascendant/Descendant">Asc</button>
+            </div>
+            <button id="btnApplySort" class="btn w-full">Appliquer le tri</button>
+          </div>
+        </div>
+
+        <div id="progress" class="mt-2 text-sm text-gray-700">Aucun fichier importé.</div>
+      </section>
+
+      <!-- Tableau -->
+      <section class="card">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="card-title">Électeurs</h2>
+          <div class="flex items-center gap-2 text-sm">
+            <span>Par page :</span>
+            <select id="pageSize" class="input w-28">
+              <option value="500">500</option>
+              <option value="1000" selected>1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="table" id="table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Prénom</th>
+                <th>Bureau de vote</th>
+                <th>Adresse</th>
+                <th>Email</th>
+                <th>Téléphone</th>
+                <th>Remarque</th>
+                <th>Statut</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex items-center justify-between mt-3 text-sm">
+          <div id="pageInfo" class="text-gray-600">Page 1 / 1</div>
+          <div class="flex items-center gap-2">
+            <button id="btnPrev" class="btn-secondary">Précédent</button>
+            <button id="btnNext" class="btn-secondary">Suivant</button>
+            <span>Aller à :</span>
+            <input id="gotoInput" class="input w-20" type="number" min="1" value="1" />
+            <button id="btnGoto" class="btn-secondary">Aller</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="max-w-7xl mx-auto px-4 py-6 text-center text-xs text-gray-500">
+      Hors-ligne. Sauvegarde locale (navigateur).
+    </footer>
+
+    <!-- Script de l'app -->
+    <script defer src="app.js"></script>
+  </body>
+</html>
