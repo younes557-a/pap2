@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Porte-à-Porte – Ris-Orangis</title>
 
-    <!-- Styles locaux -->
-    <link rel="stylesheet" href="styles.css" />
-
-    <!-- Tailwind CDN (utilitaires) -->
+    <!-- 1) Tailwind d'abord (préflight) -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- PapaParse pour CSV -->
+    <!-- 2) Librairies JS -->
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+    <!-- 3) Ton CSS en dernier pour qu'il PRÉVALE (cache-busting v=2) -->
+    <link rel="stylesheet" href="styles.css?v=2" />
 
     <meta name="description" content="Outil statique hors-ligne pour le porte-à-porte : import CSV, filtres, tri, pagination, statuts et export." />
   </head>
@@ -38,6 +38,9 @@
             Importer un CSV
             <input id="fileInput" type="file" accept=".csv,text/csv" class="hidden" />
           </label>
+
+          <!-- Bouton pour vider le stockage local -->
+          <button id="btnResetAll" class="btn-tertiary">Réinitialiser données locales</button>
         </div>
       </div>
     </header>
